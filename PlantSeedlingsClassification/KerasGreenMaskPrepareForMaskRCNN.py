@@ -1,34 +1,15 @@
 import os
 import numpy as np
 import pandas as pd
-import datetime as dt
 import matplotlib.pyplot as plt
 plt.rcParams["figure.figsize"] = [16,10]
 plt.rcParams["font.size"] = 16
-import seaborn as sns
-from mpl_toolkits.axes_grid1 import ImageGrid
 from tqdm import tqdm
-from keras.models import Model, Sequential
-from keras.layers import Input, Flatten, Dense, Conv2D, MaxPooling2D,Dropout
-from keras.utils import layer_utils
-from keras import backend as K
-from keras.optimizers import RMSprop, SGD, Adam
-from keras.callbacks import  EarlyStopping, ReduceLROnPlateau, ModelCheckpoint, TensorBoard, CSVLogger
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import log_loss, accuracy_score, f1_score, confusion_matrix
+import pickle
 from keras.preprocessing import image
-from keras.applications.vgg16 import VGG16
-from keras.applications.resnet50 import ResNet50
-from keras.applications import xception
-from keras.applications import inception_v3
-from keras.applications.vgg16 import  preprocess_input, decode_predictions
-from keras.preprocessing.image import ImageDataGenerator
-from sklearn.linear_model import LogisticRegression
 import cv2
 
-
-class VggTrainPSC(object):
-
+class MaskDataFeed(object):
     def __init__(self):
 
         models_dir = os.path.join('models')
@@ -45,17 +26,13 @@ class VggTrainPSC(object):
         self.sample_submission = pd.read_csv('sample_submission.csv')
         self.INPUT_SIZE = 300
 
-
         self.prepare_train_test_fig_path()
         self.visualization()
         self.generate_validation_split_parameter()
 
-
-
     def visualization(self):
         for category in self.CATEGORIES:
             print('{} {} images'.format(category, len(os.listdir(os.path.join(self.train_dir, category)))))
-
 
     def prepare_train_test_fig_path(self):
         '''
@@ -78,7 +55,6 @@ class VggTrainPSC(object):
         train.head(2)
         print("use train shape",train.shape)
         self.train_data = train
-
         test = []
         for file in os.listdir(self.test_dir):
             test.append(['green_mask_test\\test/{}'.format(file), file])
@@ -93,21 +69,6 @@ class VggTrainPSC(object):
         img = image.img_to_array(img)
         return img
 
-    def give_example_images(self):
-        fig = plt.figure(1, figsize=(self.NUM_CATEGORIES, self.NUM_CATEGORIES))
-        grid = ImageGrid(fig, 111, nrows_ncols=(self.NUM_CATEGORIES, self.NUM_CATEGORIES), axes_pad=0.05)
-        i = 0
-        for category_id, category in enumerate(self.CATEGORIES):
-            for filepath in self.train_data[self.train_data['category'] == category]['filepath'].values[:self.NUM_CATEGORIES]:
-                ax = grid[i]
-                img = self.read_image(filepath, (224, 224))
-                ax.imshow(img / 255.)
-                ax.axis('off')
-                if i % self.NUM_CATEGORIES == self.NUM_CATEGORIES - 1:
-                    ax.text(250, 112, filepath.split('/')[1], verticalalignment='center')
-                i += 1
-        plt.show()
-
     def generate_validation_split_parameter(self):
         np.random.seed(seed=self.SEED)
         rnd = np.random.random(len(self.train_data))
@@ -121,132 +82,65 @@ class VggTrainPSC(object):
         self.yv = yv    # validation y
         print(len(ytr),len(yv))
 
-
-    def confusion_matrix_plot(self):
-        cnf_matrix = confusion_matrix(self.yv,self.valid_preds)
-        abbreviation = ['BG', 'Ch', 'Cl', 'CC', 'CW', 'FH', 'LSB', 'M', 'SM', 'SP', 'SFC', 'SB']
-        pd.DataFrame({'class':self.CATEGORIES, 'abbreviation': abbreviation})
-        fig, ax = plt.subplots(1)
-        ax = sns.heatmap(cnf_matrix, ax=ax, cmap=plt.cm.Greens, annot=True)
-        ax.set_xticklabels(abbreviation)
-        ax.set_yticklabels(abbreviation)
-        plt.title('Confusion Matrix')
-        plt.ylabel('True class')
-        plt.xlabel('Predicted class')
-        plt.show()
-
-    def create_submission(self):
-        x_test = np.zeros((len(self.test_data), self.INPUT_SIZE, self.INPUT_SIZE, 3), dtype='float32')
-        for i, filepath in tqdm(enumerate(self.test_data['filepath'])):
-            img = self.read_image(filepath, (self.INPUT_SIZE, self.INPUT_SIZE))
-            x = xception.preprocess_input(np.expand_dims(img.copy(), axis=0))
-            x_test[i] = x
-        print('test Images shape: {} size: {:,}'.format(x_test.shape, x_test.size))
-        test_x_bf = self.xception_bottleneck.predict(x_test, batch_size=32, verbose=1)
-        print('Xception test bottleneck features shape: {} size: {:,}'.format(test_x_bf.shape, test_x_bf.size))
-        test_preds = self.logreg.predict(test_x_bf)
-        self.test_data['category_id'] = test_preds
-        self.test_data['species'] = [self.CATEGORIES[c] for c in test_preds]
-        self.test_data[['file', 'species']].to_csv('submission.csv', index=False)
-
     def generator_mask_figs(self):
-        #for i, filepath in tqdm(enumerate(self.train_data['filepath'])):
         for i, filepath in tqdm(enumerate(self.test_data['filepath'])):
-
-
             debug=0
-
             img = self.read_image(filepath, (self.INPUT_SIZE, self.INPUT_SIZE))
             if debug:
                 img = self.read_image("C:\\Users\Administrator\Desktop\KaggleCompetitionStorage\PlantSeedlingsClassification\\train\Black-grass\\775735fb9.png", (self.INPUT_SIZE, self.INPUT_SIZE))
-
-
             # kill Red and Blue
             img[img[:,:,0]>img[:,:,1]] = (0,0,0)
             img[img[:,:,2]>img[:,:,1]] = (0,0,0)
             # kill white: r+b > 1.6*green
             img[(img[:,:,0]+img[:,:,2])>img[:,:,1]*1.6] = (0,0,0)
-
             if debug:
                 plt.imshow(img/255)
                 plt.show()
                 exit()
-            #cv2.imwrite("green_mask/"+filepath,img)
             cv2.imwrite("green_mask_test/"+filepath,img)
 
-    def Vgg_bottleneck_feature_extraction_then_LR(self):
-        INPUT_SIZE = 224
-        POOLING = 'avg'
-        x_train = np.zeros((len(self.train_data), INPUT_SIZE, INPUT_SIZE, 3), dtype='float32')
+    def prepare_mask_rcnn_data(self):
+        def preprocess_input(x):
+            x /= 255.
+            x -= 0.5
+            x *= 2.
+            return x
+        '''
+        mask rcnn data is {"train":{
+        "<label>": [image_array,mask_array]}
+        "test":{"label":[...]}
+        }
+        }
+
+        '''
+        mask_rcnn_data = {}
+
+        x_train = np.zeros((len(self.train_data), self.INPUT_SIZE, self.INPUT_SIZE, 3), dtype='float32')
         for i, file in tqdm(enumerate(self.train_data['filepath'])):
-            img = self.read_image(file, (INPUT_SIZE, INPUT_SIZE))
+            img = self.read_image(file, (self.INPUT_SIZE, self.INPUT_SIZE))
             x = preprocess_input(np.expand_dims(img.copy(), axis=0))
             x_train[i] = x
         print('Train Images shape: {} size: {:,}'.format(x_train.shape, x_train.size))
 
         Xtr = x_train[self.train_idx]
         Xv = x_train[self.valid_idx]
-        print((Xtr.shape, Xv.shape, self.ytr.shape, self.yv.shape))
-        vgg_bottleneck = VGG16(weights='imagenet', include_top=False, pooling=POOLING)
-        train_vgg_bf = vgg_bottleneck.predict(Xtr, batch_size=32, verbose=1)
-        valid_vgg_bf = vgg_bottleneck.predict(Xv, batch_size=32, verbose=1)
-        print('VGG train bottleneck features shape: {} size: {:,}'.format(train_vgg_bf.shape, train_vgg_bf.size))
-        print('VGG valid bottleneck features shape: {} size: {:,}'.format(valid_vgg_bf.shape, valid_vgg_bf.size))
+        print("all data shape is: ",(Xtr.shape, Xv.shape, self.ytr.shape, self.yv.shape))
+        x_test = np.zeros((len(self.test_data), self.INPUT_SIZE, self.INPUT_SIZE, 3), dtype='float32')
 
-        '''
-        the output of vgg or xception bottleneck is a vector
-        and we can plot the vector of different sample
-        and see the Distribution of Sample Features
+        for i, filepath in tqdm(enumerate(self.test_data['filepath'])):
+            img = self.read_image(filepath, (self.INPUT_SIZE, self.INPUT_SIZE))
+            x = preprocess_input(np.expand_dims(img.copy(), axis=0))
+            x_test[i] = x
 
-
-
-        '''
-
-        logreg = LogisticRegression(multi_class='multinomial', solver='lbfgs', random_state=self.SEED)
-        # after directly get output from 512, without Dense train, just use LR train
-        logreg.fit(train_vgg_bf, self.ytr)
-        valid_probs = logreg.predict_proba(valid_vgg_bf)
-        valid_preds = logreg.predict(valid_vgg_bf)
-
-        print('Validation VGG Accuracy {}'.format(accuracy_score(self.yv, valid_preds)))
-        self.valid_preds = valid_preds
-        self.logreg = logreg
-        self.INPUT_SIZE = INPUT_SIZE
-
-    def Xception_feature_extraction_then_LR(self):
-        INPUT_SIZE = 299
-        POOLING = 'avg'
-        x_train = np.zeros((len(self.train_data), INPUT_SIZE, INPUT_SIZE, 3), dtype='float32')
-        for i, file in tqdm(enumerate(self.train_data['filepath'])):
-            img = self.read_image(file, (INPUT_SIZE, INPUT_SIZE))
-            x = xception.preprocess_input(np.expand_dims(img.copy(), axis=0))
-            x_train[i] = x
-        print('Train Images shape: {} size: {:,}'.format(x_train.shape, x_train.size))
-
-        Xtr = x_train[self.train_idx]
-        Xv = x_train[self.valid_idx]
-        print((Xtr.shape, Xv.shape, self.ytr.shape, self.yv.shape))
-        xception_bottleneck = xception.Xception(weights='imagenet', include_top=False, pooling=POOLING)
-        train_x_bf = xception_bottleneck.predict(Xtr, batch_size=32, verbose=1)
-        valid_x_bf = xception_bottleneck.predict(Xv, batch_size=32, verbose=1)
-        print('Xception train bottleneck features shape: {} size: {:,}'.format(train_x_bf.shape, train_x_bf.size))
-        print('Xception valid bottleneck features shape: {} size: {:,}'.format(valid_x_bf.shape, valid_x_bf.size))
-
-        logreg = LogisticRegression(multi_class='multinomial', solver='lbfgs', random_state=self.SEED)
-        logreg.fit(train_x_bf, self.ytr)
-        valid_probs = logreg.predict_proba(valid_x_bf)
-        valid_preds = logreg.predict(valid_x_bf)
-        print('Validation VGG Accuracy {}'.format(accuracy_score(self.yv, valid_preds)))
-        self.valid_preds = valid_preds
-        self.logreg = logreg
-        self.INPUT_SIZE = INPUT_SIZE
-        self.xception_bottleneck = xception_bottleneck
-
+        mask_rcnn_data["X_train"] = Xtr
+        mask_rcnn_data["X_valid"] = Xv
+        mask_rcnn_data["y_train"] = self.ytr
+        mask_rcnn_data["y_valid"] = self.yv
+        mask_rcnn_data["X_test"] = x_test
+        with open("mask_rcnn_data.pkl","wb") as f:
+            pickle.dump(mask_rcnn_data,f)
 
 if __name__ == '__main__':
-    psc = VggTrainPSC()
+    psc = MaskDataFeed()
+    psc.prepare_mask_rcnn_data()
     #psc.generator_mask_figs()
-    #psc.give_example_images()
-    psc.Xception_feature_extraction_then_LR()
-    psc.confusion_matrix_plot()
-    psc.create_submission()
