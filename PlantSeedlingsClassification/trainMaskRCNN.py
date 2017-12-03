@@ -8,7 +8,7 @@ import numpy as np
 import cv2
 import matplotlib
 import matplotlib.pyplot as plt
-
+import pickle
 from config import Config
 import utils
 import model as modellib
@@ -25,13 +25,13 @@ MODEL_DIR = os.path.join(ROOT_DIR, "logs")
 COCO_MODEL_PATH = os.path.join(ROOT_DIR, "mask_rcnn_coco.h5")
 
 
-class ShapesConfig(Config):
+class SeedlingConfig(Config):
     """Configuration for training on the toy shapes dataset.
     Derives from the base Config class and overrides values specific
     to the toy shapes dataset.
     """
     # Give the configuration a recognizable name
-    NAME = "shapes"
+    NAME = "seedling"
 
     # Train on 1 GPU and 8 images per GPU. We can put multiple images on each
     # GPU because the images are small. Batch size is 8 (GPUs * images/GPU).
@@ -39,12 +39,12 @@ class ShapesConfig(Config):
     IMAGES_PER_GPU = 4
 
     # Number of classes (including background)
-    NUM_CLASSES = 1 + 3  # background + 3 shapes
+    NUM_CLASSES = 1 + 12  # background + 3 shapes
 
     # Use small images for faster training. Set the limits of the small side
     # the large side, and that determines the image shape.
-    IMAGE_MIN_DIM = 300
-    IMAGE_MAX_DIM = 300
+    IMAGE_MIN_DIM = 128
+    IMAGE_MAX_DIM = 128
 
     # Use smaller anchors because our image and objects are small
     RPN_ANCHOR_SCALES = (8, 16, 32, 64, 128)  # anchor side in pixels
@@ -59,7 +59,7 @@ class ShapesConfig(Config):
     # use small validation steps since the epoch is small
     VALIDATION_STEPS = 5
 
-config = ShapesConfig()
+config = SeedlingConfig()
 config.display()
 
 
@@ -74,15 +74,37 @@ def get_ax(rows=1, cols=1, size=8):
     _, ax = plt.subplots(rows, cols, figsize=(size * cols, size * rows))
     return ax
 
-class SeedlingDataset(utils.Dataset):
+class SeedlingTrain(utils.Dataset):
     """Generates the shapes synthetic dataset. The dataset consists of simple
     shapes (triangles, squares, circles) placed randomly on a blank surface.
     The images are generated on the fly. No file access required.
     """
     def __init__(self):
         #TODO: read the data from pickle
+        super(SeedlingTrain, self).__init__()
 
-        self.image_data = []
+        with open("mask_rcnn_data_train.pkl", "rb") as f:
+            self.train = pickle.load(f)
+
+        with open("mask_rcnn_data_mask.pkl", "rb") as f:
+            self.mask_data = pickle.load(f)
+
+        self.train_samples = len(self.train)
+
+        for i, label in enumerate(['Black-grass', 'Charlock', 'Cleavers', 'Common Chickweed', 'Common wheat', 'Fat Hen',
+                      'Loose Silky-bent',
+                      'Maize', 'Scentless Mayweed', 'Shepherds Purse', 'Small-flowered Cranesbill', 'Sugar beet']):
+            print(i,label)
+            self.add_class("seedling",i+1,label)
+
+        # !!!!! should attention that: the class should start from 1 rather than 0 !!!!! 0 is background!!!!!
+
+
+        for i in range(self.train_samples):
+            self.add_image(image_id=i, label=[self.mask_data[i][1][0]+1],source="seedling",path=None)
+
+
+
 
     def load_image(self, image_id):
         """Generate an image from the specs of the given image ID.
@@ -90,57 +112,80 @@ class SeedlingDataset(utils.Dataset):
         in this case it generates the image on the fly from the
         specs in image_info.
         """
-        info = self.image_info[image_id]
-        bg_color = np.array(info['bg_color']).reshape([1, 1, 3])
-        image = np.ones([info['height'], info['width'], 3], dtype=np.uint8)
-        image = image * bg_color.astype(np.uint8)
-        for shape, color, dims in info['shapes']:
-            image = self.draw_shape(image, shape, dims, color)
-        return image
+        return self.train[image_id]
+
+    def load_mask(self,image_id):
+
+        return self.mask_data[image_id][0], [self.mask_data[image_id][1][0]+1]
+
 
     def image_reference(self, image_id):
         """Return the shapes data of the image."""
         info = self.image_info[image_id]
-        if info["source"] == "shapes":
-            return info["shapes"]
-        else:
-            super(self.__class__).image_reference(self, image_id)
+        return info["label"]
 
-    def load_mask(self, image_id):
-        """Generate instance masks for shapes of the given image ID.
+
+
+class SeedlingTest(utils.Dataset):
+    def __init__(self):
+        super(SeedlingTest, self).__init__()
+
+        with open("mask_rcnn_data_test.pkl", "rb") as f:
+            self.test = pickle.load(f)
+
+        for i, label in enumerate(['Black-grass', 'Charlock', 'Cleavers', 'Common Chickweed', 'Common wheat', 'Fat Hen',
+                      'Loose Silky-bent',
+                      'Maize', 'Scentless Mayweed', 'Shepherds Purse', 'Small-flowered Cranesbill', 'Sugar beet']):
+            print(i,label)
+            self.add_class("seedling",i+1,label)
+
+        # !!!!! should attention that: the class should start from 1 rather than 0 !!!!! 0 is background!!!!!
+
+        self.test_sample = len(self.test)
+
+        for i in range(self.test_sample):
+            self.add_image(image_id=i, label=None,source="seedling",path=None)
+
+
+    def load_image(self, image_id):
+        """Generate an image from the specs of the given image ID.
+        Typically this function loads the image from a file, but
+        in this case it generates the image on the fly from the
+        specs in image_info.
         """
-        info = self.image_info[image_id]
-        shapes = info['shapes']
-        count = len(shapes)
-        mask = np.zeros([info['height'], info['width'], count], dtype=np.uint8)
-        for i, (shape, _, dims) in enumerate(info['shapes']):
-            mask[:, :, i:i+1] = self.draw_shape(mask[:, :, i:i+1].copy(),
-                                                shape, dims, 1)
-        # Handle occlusions
-        occlusion = np.logical_not(mask[:, :, -1]).astype(np.uint8)
-        for i in range(count-2, -1, -1):
-            mask[:, :, i] = mask[:, :, i] * occlusion
-            occlusion = np.logical_and(occlusion, np.logical_not(mask[:, :, i]))
-        # Map class names to class IDs.
-        class_ids = np.array([self.class_names.index(s[0]) for s in shapes])
-        return mask, class_ids.astype(np.int32)
+        return self.test[image_id][0]
+    def load_filename(self,image_id):
+        return self.test[image_id][1]
 
 
-dataset_train = ShapesDataset()
-dataset_train.load_shapes(500, config.IMAGE_SHAPE[0], config.IMAGE_SHAPE[1])
+
+dataset_train = SeedlingTrain()
 dataset_train.prepare()
 
-# Validation dataset
-dataset_val = ShapesDataset()
-dataset_val.load_shapes(50, config.IMAGE_SHAPE[0], config.IMAGE_SHAPE[1])
-dataset_val.prepare()
+image_ids = np.random.choice(dataset_train.image_ids, 3)
 
-# Load and display random samples
-image_ids = np.random.choice(dataset_train.image_ids, 4)
-for image_id in image_ids:
-    image = dataset_train.load_image(image_id)
-    mask, class_ids = dataset_train.load_mask(image_id)
-    visualize.display_top_masks(image, mask, class_ids, dataset_train.class_names)
+debug = 0
+if debug:
+    for image_id in image_ids:
+        image = dataset_train.load_image(image_id)
+        mask, class_ids = dataset_train.load_mask(image_id)
+
+        #print("the dataset shape: \n")
+        #print(image.shape,"\n",mask.shape,"\n",class_ids)
+        #print(image,"\n",mask)
+
+        visualize.display_top_masks(image, mask, class_ids, dataset_train.class_names)
+
+
+# Validation dataset
+
+
+dataset_train = SeedlingTrain()
+dataset_train.prepare()
+
+dataset_test = SeedlingTest()
+dataset_test.prepare()
+
 
 # Create model in training mode
 model = modellib.MaskRCNN(mode="training", config=config,
@@ -166,12 +211,12 @@ elif init_with == "last":
 
 
 
-model.train(dataset_train, dataset_val,
+model.train(dataset_train, dataset_test,
                 learning_rate=config.LEARNING_RATE,
                 epochs=1,
                 layers='heads')
 
-model.train(dataset_train, dataset_val,
+model.train(dataset_train, dataset_test,
             learning_rate=config.LEARNING_RATE / 10,
             epochs=2,
             layers="all")
