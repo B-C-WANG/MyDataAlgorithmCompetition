@@ -36,7 +36,7 @@ class SeedlingConfig(Config):
     # Train on 1 GPU and 8 images per GPU. We can put multiple images on each
     # GPU because the images are small. Batch size is 8 (GPUs * images/GPU).
     GPU_COUNT = 1
-    IMAGES_PER_GPU = 4
+    IMAGES_PER_GPU = 8
 
     # Number of classes (including background)
     NUM_CLASSES = 1 + 12  # background + 3 shapes
@@ -47,7 +47,9 @@ class SeedlingConfig(Config):
     IMAGE_MAX_DIM = 128
 
     # Use smaller anchors because our image and objects are small
-    RPN_ANCHOR_SCALES = (8, 16, 32, 64, 128)  # anchor side in pixels
+    #RPN_ANCHOR_SCALES = (8, 16, 32, 64, 128)  # anchor side in pixels
+
+    RPN_ANCHOR_SCALES = (8, 16,32, 64, 128)
 
     # Reduce training ROIs per image because the images are small and have
     # few objects. Aim to allow ROI sampling to pick 33% positive ROIs.
@@ -58,6 +60,7 @@ class SeedlingConfig(Config):
 
     # use small validation steps since the epoch is small
     VALIDATION_STEPS = 5
+
 
 config = SeedlingConfig()
 config.display()
@@ -74,6 +77,9 @@ def get_ax(rows=1, cols=1, size=8):
     _, ax = plt.subplots(rows, cols, figsize=(size * cols, size * rows))
     return ax
 
+
+train_val_split_ratio = 0.8
+
 class SeedlingTrain(utils.Dataset):
     """Generates the shapes synthetic dataset. The dataset consists of simple
     shapes (triangles, squares, circles) placed randomly on a blank surface.
@@ -89,7 +95,7 @@ class SeedlingTrain(utils.Dataset):
         with open("mask_rcnn_data_mask.pkl", "rb") as f:
             self.mask_data = pickle.load(f)
 
-        self.train_samples = len(self.train)
+        self.train_samples = int(len(self.train)*0.8)
 
         for i, label in enumerate(['Black-grass', 'Charlock', 'Cleavers', 'Common Chickweed', 'Common wheat', 'Fat Hen',
                       'Loose Silky-bent',
@@ -101,7 +107,7 @@ class SeedlingTrain(utils.Dataset):
 
 
         for i in range(self.train_samples):
-            self.add_image(image_id=i, label=[self.mask_data[i][1][0]+1],source="seedling",path=None)
+            self.add_image(image_id=i, label=np.array([self.mask_data[i][1][0]+1]),source="seedling",path=None)
 
 
 
@@ -116,7 +122,60 @@ class SeedlingTrain(utils.Dataset):
 
     def load_mask(self,image_id):
 
-        return self.mask_data[image_id][0], [self.mask_data[image_id][1][0]+1]
+        return self.mask_data[image_id][0], np.array([self.mask_data[image_id][1][0]+1])
+
+
+    def image_reference(self, image_id):
+        """Return the shapes data of the image."""
+        info = self.image_info[image_id]
+        return info["label"]
+
+
+class SeedlingVal(utils.Dataset):
+    """Generates the shapes synthetic dataset. The dataset consists of simple
+    shapes (triangles, squares, circles) placed randomly on a blank surface.
+    The images are generated on the fly. No file access required.
+    """
+    def __init__(self):
+        #TODO: read the data from pickle
+        super(SeedlingVal, self).__init__()
+
+        with open("mask_rcnn_data_train.pkl", "rb") as f:
+            self.train = pickle.load(f)
+
+        with open("mask_rcnn_data_mask.pkl", "rb") as f:
+            self.mask_data = pickle.load(f)
+
+        self.val_samples = int(len(self.train)*0.8)
+
+
+        for i, label in enumerate(['Black-grass', 'Charlock', 'Cleavers', 'Common Chickweed', 'Common wheat', 'Fat Hen',
+                      'Loose Silky-bent',
+                      'Maize', 'Scentless Mayweed', 'Shepherds Purse', 'Small-flowered Cranesbill', 'Sugar beet']):
+            print(i,label)
+            self.add_class("seedling",i+1,label)
+
+        # !!!!! should attention that: the class should start from 1 rather than 0 !!!!! 0 is background!!!!!
+
+
+
+        for i in range(self.val_samples,):
+            self.add_image(image_id=i-self.val_samples, label=np.array([self.mask_data[i][1][0]+1]),source="seedling",path=None)
+
+
+
+
+    def load_image(self, image_id):
+        """Generate an image from the specs of the given image ID.
+        Typically this function loads the image from a file, but
+        in this case it generates the image on the fly from the
+        specs in image_info.
+        """
+        return self.train[image_id]
+
+    def load_mask(self,image_id):
+
+        return self.mask_data[image_id][0], np.array([self.mask_data[image_id][1][0]+1])
 
 
     def image_reference(self, image_id):
@@ -157,15 +216,20 @@ class SeedlingTest(utils.Dataset):
     def load_filename(self,image_id):
         return self.test[image_id][1]
 
+    def load_mask(self,image_id):
+
+        return self.mask_data[image_id][0], [self.mask_data[image_id][1][0]+1]
 
 
-dataset_train = SeedlingTrain()
-dataset_train.prepare()
-
-image_ids = np.random.choice(dataset_train.image_ids, 3)
 
 debug = 0
 if debug:
+
+    dataset_train = SeedlingTrain()
+    dataset_train.prepare()
+
+    image_ids = np.random.choice(dataset_train.image_ids, 3)
+
     for image_id in image_ids:
         image = dataset_train.load_image(image_id)
         mask, class_ids = dataset_train.load_mask(image_id)
@@ -177,14 +241,23 @@ if debug:
         visualize.display_top_masks(image, mask, class_ids, dataset_train.class_names)
 
 
+
 # Validation dataset
 
 
 dataset_train = SeedlingTrain()
 dataset_train.prepare()
 
-dataset_test = SeedlingTest()
-dataset_test.prepare()
+dataset_val = SeedlingVal()
+dataset_val.prepare()
+
+
+image_id_debug = 0
+if image_id_debug:
+
+    for i in range(dataset_train.train_samples):
+        print(dataset_train.load_mask(i)[1])
+    exit()
 
 
 # Create model in training mode
@@ -211,12 +284,12 @@ elif init_with == "last":
 
 
 
-model.train(dataset_train, dataset_test,
+model.train(dataset_train, dataset_val,
                 learning_rate=config.LEARNING_RATE,
                 epochs=1,
                 layers='heads')
 
-model.train(dataset_train, dataset_test,
+model.train(dataset_train, dataset_val,
             learning_rate=config.LEARNING_RATE / 10,
             epochs=2,
             layers="all")

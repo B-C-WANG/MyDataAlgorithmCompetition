@@ -33,6 +33,7 @@ import utils
 # Requires TensorFlow 1.3+ and Keras 2.0.8+.
 from distutils.version import LooseVersion
 import tqdm
+import tqdm
 assert LooseVersion(tf.__version__) >= LooseVersion("1.3")
 assert LooseVersion(keras.__version__) >= LooseVersion('2.0.8')
 
@@ -1168,9 +1169,15 @@ def load_image_gt(dataset, config, image_id, augment=False,
     # Active classes
     # Different datasets have different classes, so track the
     # classes supported in the dataset of this image.
+
+
+
     active_class_ids = np.zeros([dataset.num_classes], dtype=np.int32)
+    #print(active_class_ids)
     source_class_ids = dataset.source_class_ids[dataset.image_info[image_id]["source"]]
+    #print(source_class_ids)
     active_class_ids[source_class_ids] = 1
+    #print(active_class_ids)
 
     # Resize masks to smaller size to reduce memory usage
     if use_mini_mask:
@@ -1178,7 +1185,7 @@ def load_image_gt(dataset, config, image_id, augment=False,
 
     # Image meta data
     image_meta = compose_image_meta(image_id, shape, window, active_class_ids)
-
+    print("got class ids, should not be zero: ",class_ids)
     return image, image_meta, class_ids, bbox, mask
 
 
@@ -1558,13 +1565,18 @@ def data_generator(dataset, config, shuffle=True, augment=True, random_rois=0,
                                              config.RPN_ANCHOR_STRIDE)
 
     # Keras requires a generator to run indefinately.
+    pbar = tqdm.tqdm(total=1000)
     while True:
+        pbar.update(1)
         try:
             # Increment index to pick next image. Shuffle if at the start of an epoch.
+
+            #print("I: set image index.")
             image_index = (image_index + 1) % len(image_ids)
             if shuffle and image_index == 0:
                 np.random.shuffle(image_ids)
 
+            #print("I: Getting GT bounding boxes and masks...")
             # Get GT bounding boxes and masks for image.
             image_id = image_ids[image_index]
             image, image_meta, gt_class_ids, gt_boxes, gt_masks = \
@@ -1574,13 +1586,17 @@ def data_generator(dataset, config, shuffle=True, augment=True, random_rois=0,
             # Skip images that have no instances. This can happen in cases
             # where we train on a subset of classes and the image doesn't
             # have any of the classes we care about.
-            if not np.any(gt_class_ids > 0):
+
+            if not np.any(np.array(gt_class_ids) > 0):
+                #if len(gt_class_ids) == 0:
+                #    raise ValueError("gt class ids is []")
                 continue
 
+            #print("I: RPN targets generating")
             # RPN Targets
             rpn_match, rpn_bbox = build_rpn_targets(image.shape, anchors,
                                                     gt_class_ids, gt_boxes, config)
-
+            #print("I: Mask RCNN targets generating")
             # Mask R-CNN Targets
             if random_rois:
                 rpn_rois = generate_random_rois(
@@ -1589,7 +1605,7 @@ def data_generator(dataset, config, shuffle=True, augment=True, random_rois=0,
                     rois, mrcnn_class_ids, mrcnn_bbox, mrcnn_mask =\
                         build_detection_targets(
                             rpn_rois, gt_class_ids, gt_boxes, gt_masks, config)
-
+            #print("I: Batch arrays generating")
             # Init batch arrays
             if b == 0:
                 batch_image_meta = np.zeros(
@@ -1631,6 +1647,8 @@ def data_generator(dataset, config, shuffle=True, augment=True, random_rois=0,
                 gt_boxes = gt_boxes[ids]
                 gt_masks = gt_masks[:, :, ids]
 
+            #print("I: Adding to batch")
+
             # Add to batch
             batch_image_meta[b] = image_meta
             batch_rpn_match[b] = rpn_match[:, np.newaxis]
@@ -1647,7 +1665,6 @@ def data_generator(dataset, config, shuffle=True, augment=True, random_rois=0,
                     batch_mrcnn_bbox[b] = mrcnn_bbox
                     batch_mrcnn_mask[b] = mrcnn_mask
             b += 1
-
             # Batch full?
             if b >= batch_size:
                 inputs = [batch_images, batch_image_meta, batch_rpn_match, batch_rpn_bbox,
@@ -2140,6 +2157,7 @@ class MaskRCNN():
         # Data generators
         train_generator = data_generator(train_dataset, self.config, shuffle=True,
                                          batch_size=self.config.BATCH_SIZE)
+        print("finished train generator")
         val_generator = data_generator(val_dataset, self.config, shuffle=True,
                                        batch_size=self.config.BATCH_SIZE,
                                        augment=False)
@@ -2157,7 +2175,6 @@ class MaskRCNN():
         log("Checkpoint Path: {}".format(self.checkpoint_path))
         self.set_trainable(layers)
         self.compile(learning_rate, self.config.LEARNING_MOMENTUM)
-        print("training")
         self.keras_model.fit_generator(
             train_generator,
             initial_epoch=self.epoch,
@@ -2168,7 +2185,9 @@ class MaskRCNN():
             validation_steps=self.config.VALIDATION_STEPS,
             max_queue_size=100,
             workers=max(self.config.BATCH_SIZE // 2, 2),
-            use_multiprocessing=True,
+            #use_multiprocessing=True,
+             use_multiprocessing=False,
+
         )
         self.epoch = max(self.epoch, epochs)
 
