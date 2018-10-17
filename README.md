@@ -1,7 +1,8 @@
 # MyDataAlgorithmCompetition
 - 我参加数据竞赛（不包括数模竞赛等）的记录，里面的代码可以用在类似问题处理中
 - 代码全部都是当时完成之后原封不动的（引用他人的代码文件头有相应的作者名称），部分代码经过整理放到了MachineLearningTools中作为工具
-- 三个竞赛都是2017年7月暑假读研之前参加，之后读研集中于课题内相关的开发
+- 下面的前三个竞赛都是2017年7月暑假读研之前参加，之后读研集中于课题内相关的开发
+
 
 # 天池大数据竞赛：数聚华夏 创享未来”中国数据创新行-智慧交通预测挑战赛
 - 地址：[https://tianchi.aliyun.com/competition/introduction.htm?spm=5176.100150.711.10.3aee2784Y1VVQd&raceId=231598](https://tianchi.aliyun.com/competition/introduction.htm?spm=5176.100150.711.10.3aee2784Y1VVQd&raceId=231598)
@@ -36,3 +37,6 @@
 
 - 天池数据竞赛证书：
 ![](https://i.imgur.com/LIvWwPE.png)
+
+# 其他
+- 天池oppo-OGeek算法挑战赛：数据集并不好，基本上通过统计用户搜索词和点击概率来进行预测即可，美其名曰朴素贝叶斯也可。如果真要用词向量什么的来做，对于这个数据集来讲，对于竞赛来讲，是性价比很低的。
